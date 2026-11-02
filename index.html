@@ -75,3 +75,209 @@
     </style>
   </body>
 </html>
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Free for Developers — Interactive Directory</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+  <style>
+    ::-webkit-scrollbar { width: 8px; }
+    ::-webkit-scrollbar-track { background: #1e293b; }
+    ::-webkit-scrollbar-thumb { background: #475569; border-radius: 4px; }
+    ::-webkit-scrollbar-thumb:hover { background: #64748b; }
+  </style>
+</head>
+<body class="bg-slate-900 text-slate-100 font-sans min-h-screen flex flex-col">
+
+  <!-- Header -->
+  <header class="sticky top-0 z-20 bg-slate-800/95 backdrop-blur border-b border-slate-700 px-6 py-4">
+    <div class="max-w-7xl mx-auto flex flex-col md:flex-row items-center justify-between gap-4">
+      <div class="flex items-center gap-3">
+        <div class="w-10 h-10 rounded-lg bg-indigo-600 flex items-center justify-center font-bold text-xl">F</div>
+        <div>
+          <h1 class="text-xl font-bold tracking-tight">Free for Dev</h1>
+          <p class="text-xs text-slate-400">Interactive Resource Explorer</p>
+        </div>
+      </div>
+
+      <!-- Search Bar -->
+      <div class="relative w-full md:w-96">
+        <input 
+          id="searchInput" 
+          type="text" 
+          placeholder="Search tools, APIs, cloud providers..." 
+          class="w-full bg-slate-900 border border-slate-700 rounded-lg px-4 py-2 text-sm focus:outline-none focus:border-indigo-500 transition"
+        />
+        <span id="resultCount" class="absolute right-3 top-2.5 text-xs text-slate-500"></span>
+      </div>
+    </div>
+  </header>
+
+  <!-- Main Layout -->
+  <div class="max-w-7xl mx-auto w-full flex-1 flex flex-col md:flex-row gap-6 p-6">
+    
+    <!-- Sidebar Categories -->
+    <aside class="w-full md:w-64 shrink-0">
+      <div class="sticky top-24 bg-slate-800 border border-slate-700 rounded-xl p-4 max-h-[calc(100vh-8rem)] overflow-y-auto">
+        <h2 class="text-xs font-semibold uppercase tracking-wider text-slate-400 mb-3">Categories</h2>
+        <ul id="categoryList" class="space-y-1 text-sm">
+          <!-- Populated by JS -->
+        </ul>
+      </div>
+    </aside>
+
+    <!-- Main Content Area -->
+    <main class="flex-1">
+      <div id="loadingState" class="text-center py-20 text-slate-400">
+        <p class="text-lg animate-pulse">Loading and parsing README.md...</p>
+      </div>
+
+      <div id="directoryGrid" class="space-y-8 hidden">
+        <!-- Populated by JS -->
+      </div>
+    </main>
+  </div>
+
+  <script>
+    const state = {
+      categories: [],
+      activeCategory: 'All',
+      searchQuery: ''
+    };
+
+    // Fetch local README.md, fallback to GitHub raw URL if opened via file://
+    async function loadMarkdown() {
+      try {
+        let response = await fetch('./README.md');
+        if (!response.ok) throw new Error('Local README not found');
+        return await response.text();
+      } catch (e) {
+        const fallbackUrl = 'https://raw.githubusercontent.com/ripienaar/free-for-dev/master/README.md';
+        const response = await fetch(fallbackUrl);
+        return await response.text();
+      }
+    }
+
+    // Parse Markdown into structured categories and items
+    function parseDirectory(markdown) {
+      const lines = markdown.split('\n');
+      const categories = [];
+      let currentCategory = null;
+
+      for (const line of lines) {
+        const headerMatch = line.match(/^##\s+(.+)/);
+        if (headerMatch) {
+          const title = headerMatch[1].trim();
+          if (title.toLowerCase() !== 'table of contents') {
+            currentCategory = { title, items: [] };
+            categories.push(currentCategory);
+          }
+          continue;
+        }
+
+        const listMatch = line.match(/^\s*[\*\-]\s+\[([^\]]+)\]\(([^)]+)\)\s*[-—:]?\s*(.*)/);
+        if (listMatch && currentCategory) {
+          currentCategory.items.push({
+            name: listMatch[1].trim(),
+            url: listMatch[2].trim(),
+            description: listMatch[3].trim() || 'No description provided.'
+          });
+        }
+      }
+      return categories.filter(c => c.items.length > 0);
+    }
+
+    function renderCategories() {
+      const listEl = document.getElementById('categoryList');
+      const allItem = `
+        <li>
+          <button onclick="setCategory('All')" class="w-full text-left px-3 py-1.5 rounded-lg transition ${state.activeCategory === 'All' ? 'bg-indigo-600 text-white font-medium' : 'text-slate-300 hover:bg-slate-700'}">
+            All Categories
+          </button>
+        </li>`;
+      
+      const catItems = state.categories.map(cat => `
+        <li>
+          <button onclick="setCategory('${cat.title.replace(/'/g, "\\'")}')" class="w-full text-left px-3 py-1.5 rounded-lg transition flex justify-between items-center ${state.activeCategory === cat.title ? 'bg-indigo-600 text-white font-medium' : 'text-slate-300 hover:bg-slate-700'}">
+            <span class="truncate pr-2">${cat.title}</span>
+            <span class="text-xs opacity-70">${cat.items.length}</span>
+          </button>
+        </li>
+      `).join('');
+
+      listEl.innerHTML = allItem + catItems;
+    }
+
+    function renderDirectory() {
+      const gridEl = document.getElementById('directoryGrid');
+      const query = state.searchQuery.toLowerCase();
+      let totalMatches = 0;
+
+      const filteredCategories = state.categories
+        .filter(cat => state.activeCategory === 'All' || cat.title === state.activeCategory)
+        .map(cat => {
+          const matchingItems = cat.items.filter(item => 
+            item.name.toLowerCase().includes(query) || 
+            item.description.toLowerCase().includes(query) ||
+            cat.title.toLowerCase().includes(query)
+          );
+          totalMatches += matchingItems.length;
+          return { ...cat, items: matchingItems };
+        })
+        .filter(cat => cat.items.length > 0);
+
+      document.getElementById('resultCount').textContent = `${totalMatches} tools`;
+
+      if (filteredCategories.length === 0) {
+        gridEl.innerHTML = `<div class="text-center py-16 text-slate-400">No services found matching "${state.searchQuery}".</div>`;
+        return;
+      }
+
+      gridEl.innerHTML = filteredCategories.map(cat => `
+        <section class="space-y-4">
+          <div class="border-b border-slate-700 pb-2 flex items-center justify-between">
+            <h3 class="text-lg font-bold text-indigo-400">${cat.title}</h3>
+            <span class="text-xs bg-slate-800 px-2.5 py-1 rounded-full text-slate-400 border border-slate-700">${cat.items.length} services</span>
+          </div>
+          <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+            ${cat.items.map(item => `
+              <a href="${item.url}" target="_blank" rel="noopener noreferrer" class="block bg-slate-800/60 hover:bg-slate-800 border border-slate-700/80 hover:border-indigo-500/60 rounded-xl p-4 transition group">
+                <div class="flex items-center justify-between mb-1.5">
+                  <h4 class="font-semibold text-slate-100 group-hover:text-indigo-400 transition">${item.name}</h4>
+                  <span class="text-xs text-slate-500 group-hover:translate-x-0.5 transition">↗</span>
+                </div>
+                <p class="text-xs text-slate-300 leading-relaxed">${item.description}</p>
+              </a>
+            `).join('')}
+          </div>
+        </section>
+      `).join('');
+    }
+
+    window.setCategory = function(category) {
+      state.activeCategory = category;
+      renderCategories();
+      renderDirectory();
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+    };
+
+    document.getElementById('searchInput').addEventListener('input', (e) => {
+      state.searchQuery = e.target.value;
+      renderDirectory();
+    });
+
+    // Initialize Application
+    (async function init() {
+      const markdown = await loadMarkdown();
+      state.categories = parseDirectory(markdown);
+      document.getElementById('loadingState').classList.add('hidden');
+      document.getElementById('directoryGrid').classList.remove('hidden');
+      renderCategories();
+      renderDirectory();
+    })();
+  </script>
+</body>
+</html>
